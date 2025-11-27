@@ -3,13 +3,23 @@ import google.generativeai as genai
 from dotenv import load_dotenv
 
 # Load API Key
-load_dotenv(override=True)
-api_key = os.getenv("GOOGLE_API_KEY")
+
+import streamlit as st
+
+
+# Load API Key from Streamlit secrets OR environment
+try:
+    api_key = st.secrets["GOOGLE_API_KEY"]
+except:
+    from dotenv import load_dotenv
+    load_dotenv(override=True)
+    api_key = os.getenv("GOOGLE_API_KEY")
 
 if not api_key:
-    print("❌ ERROR: GOOGLE_API_KEY is missing!")
-else:
-    genai.configure(api_key=api_key)
+    st.error("⚠️ GOOGLE_API_KEY is missing! Add it in Streamlit Cloud secrets.")
+    st.stop()
+
+genai.configure(api_key=api_key)
 
 # Use the fast Flash model
 model = genai.GenerativeModel('gemini-2.0-flash')
