@@ -6,6 +6,20 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 
+def download_history(tickers):
+    frames = []
+    for t in tickers:
+        try:
+            h = yf.download(t, period="1y")["Close"].rename(t)
+            frames.append(h)
+        except:
+            pass
+
+    if len(frames) == 0:
+        return pd.DataFrame()
+
+    return pd.concat(frames, axis=1)
+
 def safe_price(ticker, history):
     t = yf.Ticker(ticker)
 
@@ -50,7 +64,8 @@ def fetch_market_data(holdings):
     # --- Download full history ---
     try:
         raw = yf.download(tickers, period="1y", group_by="ticker", auto_adjust=True)
-        history = raw["Close"] if "Close" in raw else pd.DataFrame()
+        history = download_history(tickers)
+
     except:
         history = pd.DataFrame()
 
