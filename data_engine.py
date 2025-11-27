@@ -33,64 +33,60 @@ def download_history(tickers, period="1y"):
     return result.dropna(how='all')  # Remove completely empty columns
 
 
+import requests
+
 def safe_price(ticker, history):
     """
-    Get current price with multiple fallback strategies.
-    Priority: 1d history > 5d history > recent close > fallback
+    100% cloud-safe price fetcher.
+    Uses Yahoo JSON endpoint before yfinance fallbacks.
     """
+    # --- 1) Try ultra-stable Yahoo finance JSON ---
     try:
-        # Strategy 1: Try 1-day history (most reliable)
-        try:
-            h = yf.download(ticker, period="1d", progress=False)
-            if not h.empty:
-                close_col = h["Close"] if isinstance(h, pd.DataFrame) else h
-                latest = close_col.iloc[-1]
-                if latest > 0:
-                    logger.info(f"{ticker}: Got price ${latest:.2f} from 1d history")
-                    return float(latest)
-        except:
-            pass
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
+        r = requests.get(url, timeout=5)
+        data = r.json()
 
-        # Strategy 2: Try 5-day history
-        try:
-            h = yf.download(ticker, period="5d", progress=False)
-            if not h.empty:
-                close_col = h["Close"] if isinstance(h, pd.DataFrame) else h
-                valid_closes = close_col[close_col > 0]
-                if len(valid_closes) > 0:
-                    latest = valid_closes.iloc[-1]
-                    logger.info(f"{ticker}: Got price ${latest:.2f} from 5d history")
-                    return float(latest)
-        except:
-            pass
+        close = data["chart"]["result"][0]["indicators"]["quote"][0]["close"]
+        close = [x for x in close if x is not None]
 
-        # Strategy 3: Use Ticker info
-        try:
-            t = yf.Ticker(ticker)
-            info = t.info
-            if "currentPrice" in info and info["currentPrice"] > 0:
-                price = float(info["currentPrice"])
-                logger.info(f"{ticker}: Got price ${price:.2f} from Ticker.info")
-                return price
-            elif "regularMarketPrice" in info and info["regularMarketPrice"] > 0:
-                price = float(info["regularMarketPrice"])
-                logger.info(f"{ticker}: Got price ${price:.2f} from regularMarketPrice")
-                return price
-        except:
-            pass
+        if len(close) > 0:
+            last_price = close[-1]
+            if last_price > 0:
+                return float(last_price)
+    except:
+        pass
 
-        # Strategy 4: Use cached history if available
-        if not history.empty and ticker in history.columns:
-            latest = history[ticker].dropna().iloc[-1] if len(history[ticker].dropna()) > 0 else 0
-            if latest > 0:
-                logger.info(f"{ticker}: Got price ${latest:.2f} from cache")
-                return float(latest)
+    # --- 2) Try 1-day history ---
+    try:
+        h = yf.download(ticker, period="1d", progress=False)
+        if not h.empty:
+            p = h["Close"].iloc[-1]
+            if p > 0:
+                return float(p)
+    except:
+        pass
 
-    except Exception as e:
-        logger.error(f"Error getting price for {ticker}: {e}")
+    # --- 3) Try 5-day history ---
+    try:
+        h = yf.download(ticker, period="5d", progress=False)
+        if not h.empty:
+            prices = h["Close"].dropna()
+            if len(prices) > 0:
+                return float(prices.iloc[-1])
+    except:
+        pass
 
-    logger.warning(f"{ticker}: Could not fetch price, returning 0.0")
+    # --- 4) Try cached history ---
+    try:
+        if ticker in history.columns:
+            p = history[ticker].dropna().iloc[-1]
+            if p > 0:
+                return float(p)
+    except:
+        pass
+
     return 0.0
+
 
 
 def get_sector(ticker):
@@ -151,9 +147,8 @@ def fetch_market_data(holdings):
             price = safe_price(ticker, history)
 
             if price == 0:
-                logger.warning(f"Skipping {ticker}: price is 0")
-                continue
-
+                logger.warning(f"{ticker}: price fetch failed, using buy_price as fallback")
+                price = buy_price  # fallback instead of dropping the ticker
             # Calculate metrics
             position_value = price * qty
             cost_basis = buy_price * qty if buy_price > 0 else 0
