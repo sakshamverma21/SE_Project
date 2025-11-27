@@ -6,8 +6,19 @@ from dotenv import load_dotenv
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-load_dotenv(override=True)
-genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+import streamlit as st
+
+# Load API Keys
+try:
+    google_key = st.secrets["GOOGLE_API_KEY"]
+    brave_key = st.secrets.get("BRAVE_API_KEY", None)
+except:
+    from dotenv import load_dotenv
+    load_dotenv(override=True)
+    google_key = os.getenv("GOOGLE_API_KEY")
+    brave_key = os.getenv("BRAVE_API_KEY")
+
+genai.configure(api_key=google_key)
 
 class IntelliAgent:
     def __init__(self, name, role):
@@ -21,13 +32,19 @@ class IntelliAgent:
         except Exception as e: return f"⚠️ Error: {e}"
 
 # --- 1. NEWS AGENT (Improved: Clean Formatting + Smart Scrape) ---
+# Update NewsAgent brave_key retrieval:
 class NewsAgent(IntelliAgent):
     def __init__(self):
         super().__init__("News Agent", "Financial Analyst. Summarize web findings.")
 
     async def run_tools(self, tickers):
-        brave_key = os.getenv("BRAVE_API_KEY")
-        if not brave_key: return "Error: BRAVE_API_KEY missing."
+        try:
+            brave_key = st.secrets["BRAVE_API_KEY"]
+        except:
+            brave_key = os.getenv("BRAVE_API_KEY")
+            
+        if not brave_key: 
+            return "⚠️ BRAVE_API_KEY missing. Add it in Streamlit secrets."
 
         # Search Tool
         search_params = StdioServerParameters(
