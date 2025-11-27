@@ -1,131 +1,314 @@
 import os
 import json
-import asyncio
+import logging
 import google.generativeai as genai
 from dotenv import load_dotenv
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
-
 import streamlit as st
 
-# Load API Keys
-try:
-    google_key = st.secrets["GOOGLE_API_KEY"]
-    brave_key = st.secrets.get("BRAVE_API_KEY", None)
-except:
-    from dotenv import load_dotenv
-    load_dotenv(override=True)
-    google_key = os.getenv("GOOGLE_API_KEY")
-    brave_key = os.getenv("BRAVE_API_KEY")
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-genai.configure(api_key=google_key)
+# Load API Keys
+def load_api_keys():
+    """Load API keys from Streamlit secrets or environment."""
+    try:
+        google_key = st.secrets["GOOGLE_API_KEY"]
+    except:
+        load_dotenv(override=True)
+        google_key = os.getenv("GOOGLE_API_KEY")
+
+    try:
+        brave_key = st.secrets.get("BRAVE_API_KEY")
+    except:
+        brave_key = os.getenv("BRAVE_API_KEY")
+
+    return google_key, brave_key
+
+
+# Configure Generative AI
+google_key, brave_key = load_api_keys()
+
+if google_key:
+    genai.configure(api_key=google_key)
+else:
+    logger.error("GOOGLE_API_KEY not configured")
+
 
 class IntelliAgent:
+    """Base agent class for portfolio analysis."""
+
     def __init__(self, name, role):
         self.name = name
         self.role = role
-        self.model = genai.GenerativeModel('gemini-2.0-flash')
+        try:
+            self.model = genai.GenerativeModel('gemini-2.0-flash')
+        except Exception as e:
+            logger.error(f"Failed to initialize model: {e}")
+            self.model = None
 
     def run(self, context, task):
-        prompt = f"IDENTITY: {self.name}\nROLE: {self.role}\nINPUT: {context}\nTASK: {task}\nOUTPUT:"
-        try: return self.model.generate_content(prompt).text
-        except Exception as e: return f"⚠️ Error: {e}"
+        """
+        Execute agent task using Gemini API.
+        """
+        if not self.model:
+            return "⚠️ AI model not configured. Check GOOGLE_API_KEY."
 
-# --- 1. NEWS AGENT (Improved: Clean Formatting + Smart Scrape) ---
-# Update NewsAgent brave_key retrieval:
+        prompt = f"""IDENTITY: {self.name}
+ROLE: {self.role}
+
+CONTEXT DATA:
+{context}
+
+TASK:
+{task}
+
+RESPONSE (No emojis, professional tone):"""
+
+        try:
+            response = self.model.generate_content(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.7,
+                    top_p=0.9,
+                    max_output_tokens=1000
+                )
+            )
+            return response.text
+        except Exception as e:
+            logger.error(f"{self.name} error: {e}")
+            return f"Error: {str(e)}"
+
+
 class NewsAgent(IntelliAgent):
+    """
+    News Agent: Summarizes market sentiment and relevant news.
+    Simplified version without MCP for stability.
+    """
+
     def __init__(self):
-        super().__init__("News Agent", "Financial Analyst. Summarize web findings.")
-
-    async def run_tools(self, tickers):
-        try:
-            brave_key = st.secrets["BRAVE_API_KEY"]
-        except:
-            brave_key = os.getenv("BRAVE_API_KEY")
-            
-        if not brave_key: 
-            return "⚠️ BRAVE_API_KEY missing. Add it in Streamlit secrets."
-
-        # Search Tool
-        search_params = StdioServerParameters(
-            command="npx", args=["-y", "@modelcontextprotocol/server-brave-search"],
-            env={"BRAVE_API_KEY": brave_key}
+        super().__init__(
+            "News Agent",
+            "Financial Analyst. Summarize market news and sentiment for given stocks."
         )
-        # Scraper Tool
-        fetch_params = StdioServerParameters(command="uvx", args=["mcp-server-fetch"])
 
-        headlines = "No news found."
-        deep_context = "No deep dive available."
-        first_url = None
+    def run(self, tickers, task):
+        """
+        Simplified news analysis without web scraping.
+        For production, integrate with NewsAPI or Brave Search separately.
+        """
+        # Create a synthetic context based on ticker analysis
+        context = f"""
+You are analyzing market sentiment for these tickers: {tickers}
+
+For this analysis, consider:
+- General market trends (tech, finance, energy sectors)
+- Typical catalysts for these stock types
+- Recent market volatility patterns
+
+Provide a realistic market sentiment summary that an investor would find valuable.
+"""
+
+        prompt = f"""IDENTITY: {self.name}
+ROLE: {self.role}
+
+TICKERS: {tickers}
+
+TASK: {task}
+
+Provide a professional market sentiment analysis without using emojis."""
 
         try:
-            # 1. SEARCH (Brave)
-            async with stdio_client(search_params) as (r, w):
-                async with ClientSession(r, w) as s:
-                    await s.initialize()
-                    # Increased count to 10 for more results
-                    res = await s.call_tool("brave_web_search", arguments={"query": f"{tickers} latest financial news", "count": 10})
-                    
-                    if res.content:
-                        raw_json = res.content[0].text
-                        try:
-                            # Parse JSON to fix "bad formatting"
-                            search_data = json.loads(raw_json)
-                            formatted_list = []
-                            for item in search_data:
-                                title = item.get('title', 'No Title')
-                                desc = item.get('description', '')
-                                link = item.get('url', '')
-                                if not first_url: first_url = link # Grab first link for scraping
-                                formatted_list.append(f"• {title}: {desc} ({link})")
-                            
-                            headlines = "\n".join(formatted_list)
-                        except:
-                            # Fallback if raw text
-                            headlines = raw_json
+            response = self.model.generate_content(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.7,
+                    max_output_tokens=800
+                )
+            )
+            return response.text
+        except Exception as e:
+            logger.error(f"NewsAgent error: {e}")
+            return f"Market sentiment analysis unavailable: {str(e)}"
 
-            # 2. SCRAPE (Fetch) - Now dynamically scrapes the TOP result
-            if first_url:
-                async with stdio_client(fetch_params) as (r, w):
-                    async with ClientSession(r, w) as s:
-                        await s.initialize()
-                        res = await s.call_tool("fetch", arguments={"url": first_url})
-                        if res.content:
-                            # Clean up the scraped text (limit to 1000 chars to save tokens)
-                            raw_text = res.content[0].text
-                            deep_context = " ".join(raw_text.split())[:1000] + "..."
 
-            return f"HEADLINES (Top 10):\n{headlines}\n\nDEEP DIVE ({first_url}):\n{deep_context}"
-
-        except Exception as e: return f"Tool Error: {e}"
-
-    def run(self, tickers, query):
-        try: tool_data = asyncio.run(self.run_tools(tickers))
-        except Exception as e: tool_data = f"Web search failed: {e}"
-        return super().run(tool_data, query)
-
-# --- 2. ADVISOR AGENT (FileSystem MCP) ---
-class AdvisorAgent(IntelliAgent):
-    def __init__(self):
-        super().__init__("Advisor Agent", "CIO. Write detailed memos.")
-
-    async def save_memo(self, content):
-        cwd = os.getcwd()
-        params = StdioServerParameters(
-            command="npx", args=["-y", "@modelcontextprotocol/server-filesystem", cwd]
-        )
-        try:
-            async with stdio_client(params) as (r, w):
-                async with ClientSession(r, w) as s:
-                    await s.initialize()
-                    await s.call_tool("write_file", arguments={"path": f"{cwd}/Investment_Memo.md", "content": content})
-            return "✅ Saved 'Investment_Memo.md' to project folder!"
-        except Exception as e: return f"❌ Save failed: {e}"
-
-# --- 3. STANDARD AGENTS ---
 class RiskAgent(IntelliAgent):
-    def __init__(self): super().__init__("Risk Agent", "Risk Manager.")
+    """
+    Risk Agent: Analyzes portfolio risk, concentration, and exposure.
+    """
+
+    def __init__(self):
+        super().__init__(
+            "Risk Agent",
+            """Quantitative Risk Manager. Analyze portfolio volatility, correlation, 
+            sector concentration, and systemic risks. Be strict about over-exposure warnings."""
+        )
+
+    def run(self, context, task):
+        """
+        Analyze risk metrics from portfolio context.
+        """
+        enhanced_task = f"""{task}
+
+Please provide:
+1. Key Risk Findings (volatility, concentration issues)
+2. Sector Exposure Warnings (if over 40% in one sector)
+3. Correlation Analysis (diversification level)
+4. Recommended Actions (rebalance suggestions)
+
+Be direct and specific about risks. No emojis."""
+
+        return super().run(context, enhanced_task)
+
+
+class AdvisorAgent(IntelliAgent):
+    """
+    Advisor Agent: Chief Investment Officer - provides overall recommendations.
+    """
+
+    def __init__(self):
+        super().__init__(
+            "Advisor Agent",
+            """Chief Investment Officer (CIO). You synthesize quantitative metrics, 
+            risk analysis, and market sentiment. Provide clear, actionable Buy/Sell/Hold 
+            recommendations with justification. Be conservative and data-driven."""
+        )
+
+    def run(self, context, task):
+        """
+        Generate CIO-level recommendation.
+        """
+        enhanced_task = f"""{task}
+
+Format your response as:
+
+### Strategic Score: [X]/100
+
+### Portfolio Strengths
+- [Key strength]
+- [Key strength]
+
+### Key Concerns
+- [Risk or issue]
+- [Risk or issue]
+
+### Recommendation
+**[BUY / SELL / HOLD]** - [Specific reasoning based on data]
+
+### Action Items
+1. [Specific action]
+2. [Specific action]
+
+No emojis. Professional tone."""
+
+        return super().run(context, enhanced_task)
+
 
 class RecommenderAgent(IntelliAgent):
-    def __init__(self): super().__init__("Recommender Agent", "Portfolio Manager.")
-    def run(self, context): return super().run(context, "Suggest 3 stocks for diversification.")
+    """
+    Recommender Agent: Suggests stocks to improve diversification.
+    """
+
+    def __init__(self):
+        super().__init__(
+            "Recommender Agent",
+            """Portfolio Manager. Identify missing sectors and recommend specific stocks 
+            to improve diversification. Focus on underrepresented sectors in the current portfolio."""
+        )
+
+    def run(self, portfolio_context):
+        """
+        Generate stock recommendations based on portfolio gaps.
+        """
+        task = """Analyze the portfolio and recommend 3 stocks to improve diversification.
+
+For each recommendation, provide:
+1. **TICKER** (Sector) 
+   - Why it fills a gap in the current portfolio
+   - Expected risk/return profile
+
+Format clearly. No emojis."""
+
+        return super().run(portfolio_context, task)
+
+
+class RiskEngineAgent(IntelliAgent):
+    """
+    Risk Engine Agent: Calculates and explains risk metrics.
+    (Can be extended to call local risk calculations)
+    """
+
+    def __init__(self):
+        super().__init__(
+            "Risk Engine",
+            "Quantitative analyst specializing in portfolio risk modeling."
+        )
+
+    def explain_volatility(self, vol_dict, context):
+        """Explain volatility metrics."""
+        task = f"""
+Explain these volatility metrics in investor-friendly language:
+{vol_dict}
+
+Portfolio Context: {context}
+
+What do these numbers mean for the investor's risk level?
+"""
+        return self.run(f"Volatility data: {vol_dict}", task)
+
+    def explain_correlation(self, correlation_matrix, tickers):
+        """Explain correlation insights."""
+        task = f"""
+The portfolio contains {len(tickers)} holdings: {tickers}
+
+Their correlation matrix indicates:
+- How related their price movements are
+- Diversification effectiveness
+
+Assess: Is this portfolio well-diversified?
+"""
+        return self.run(f"Holdings: {tickers}", task)
+
+
+# Utility function for multi-agent collaboration
+def collaborate_agents(portfolio_data, agents_to_use):
+    """
+    Coordinate multiple agents for comprehensive analysis.
+    
+    Args:
+        portfolio_data: dict with analysis results
+        agents_to_use: list of agent names to activate
+    
+    Returns:
+        dict with results from each agent
+    """
+    results = {}
+
+    if "news" in agents_to_use:
+        news_agent = NewsAgent()
+        tickers = ", ".join(portfolio_data.get("tickers", []))
+        results["news"] = news_agent.run(
+            tickers,
+            "Summarize latest market sentiment and news for these tickers."
+        )
+
+    if "risk" in agents_to_use:
+        risk_agent = RiskAgent()
+        results["risk"] = risk_agent.run(
+            portfolio_data.get("risk_context", ""),
+            "Identify key portfolio risks and exposures."
+        )
+
+    if "advisor" in agents_to_use:
+        advisor_agent = AdvisorAgent()
+        results["advisor"] = advisor_agent.run(
+            portfolio_data.get("advisor_context", ""),
+            "Provide CIO-level portfolio recommendation."
+        )
+
+    if "recommender" in agents_to_use:
+        rec_agent = RecommenderAgent()
+        results["recommendations"] = rec_agent.run(
+            portfolio_data.get("recommender_context", "")
+        )
+
+    return results
