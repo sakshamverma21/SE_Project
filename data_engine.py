@@ -1,9 +1,16 @@
+# data_engine.py
+# Patched to ensure Monte Carlo never returns an empty DataFrame and to be robust to missing history
 import requests
 import streamlit as st
 import pandas as pd
 import numpy as np
 
-API_KEY = st.secrets["ALPHA_KEY"]
+API_KEY = None
+try:
+    API_KEY = st.secrets["ALPHA_KEY"]
+except Exception:
+    # If running outside Streamlit with .env etc, leave API_KEY None (fetch functions will return empty)
+    API_KEY = None
 
 
 # ============================================================
@@ -11,18 +18,23 @@ API_KEY = st.secrets["ALPHA_KEY"]
 # ============================================================
 
 def get_live_price(ticker):
+    if not API_KEY:
+        return None
     url = (
         f"https://www.alphavantage.co/query?"
         f"function=GLOBAL_QUOTE&symbol={ticker}&apikey={API_KEY}"
     )
-    r = requests.get(url).json()
+    try:
+        r = requests.get(url, timeout=10).json()
+    except Exception:
+        return None
 
     if "Global Quote" not in r:
         return None
 
     try:
         return float(r["Global Quote"]["05. price"])
-    except:
+    except Exception:
         return None
 
 
@@ -31,12 +43,18 @@ def get_live_price(ticker):
 # ============================================================
 
 def get_history(ticker):
+    if not API_KEY:
+        return pd.Series(dtype=float)
+
     url = (
         f"https://www.alphavantage.co/query?"
         f"function=TIME_SERIES_DAILY_ADJUSTED&symbol={ticker}&outputsize=full&apikey={API_KEY}"
     )
 
-    r = requests.get(url).json()
+    try:
+        r = requests.get(url, timeout=15).json()
+    except Exception:
+        return pd.Series(dtype=float)
 
     if "Time Series (Daily)" not in r:
         return pd.Series(dtype=float)
@@ -60,6 +78,7 @@ def get_history_multi(tickers):
         if not h.empty:
             frames.append(h.rename(t))
     if frames:
+        # join on index and drop rows with NaNs to keep consistent returns
         return pd.concat(frames, axis=1).dropna()
     return pd.DataFrame()
 
@@ -99,8 +118,14 @@ def fetch_market_data(holdings):
     sectors_map = {}
 
     for ticker, data in holdings.items():
-        qty = float(data["qty"])
-        buy = float(data["buy_price"])
+        try:
+            qty = float(data["qty"])
+        except Exception:
+            qty = 0.0
+        try:
+            buy = float(data["buy_price"])
+        except Exception:
+            buy = 0.0
 
         price = get_live_price(ticker)
         if price is None:
@@ -135,6 +160,7 @@ def fetch_market_data(holdings):
 
 def calculate_portfolio_metrics(history, benchmark):
     if history.empty:
+        # return sensible empties: volatility Series, correlation DataFrame, diversification score, comp_df
         return pd.Series(dtype=float), pd.DataFrame(), 0, pd.DataFrame()
 
     returns = history.pct_change().dropna()
@@ -146,13 +172,19 @@ def calculate_portfolio_metrics(history, benchmark):
     if returns.shape[1] > 1:
         corr = returns.corr()
     else:
-        corr = pd.DataFrame([[1.0]])
+        # Single asset: correlation to itself
+        corr = pd.DataFrame([[1.0]], index=returns.columns, columns=returns.columns)
 
     # Diversification
     if returns.shape[1] > 1:
-        avg_corr = corr.values[np.triu_indices_from(corr.values, 1)].mean()
+        # average of upper triangle (exclude diagonal)
+        tri_idx = np.triu_indices_from(corr.values, 1)
+        try:
+            avg_corr = corr.values[tri_idx].mean()
+        except Exception:
+            avg_corr = 1.0
     else:
-        avg_corr = 1
+        avg_corr = 1.0
     div_score = int((1 - avg_corr) * 100)
 
     # Benchmark comparison
@@ -163,7 +195,8 @@ def calculate_portfolio_metrics(history, benchmark):
     if benchmark is not None and not benchmark.empty:
         b_ret = benchmark.pct_change().dropna()
         idx = port_cum.index.intersection(b_ret.index)
-        comp["Benchmark"] = (1 + b_ret.loc[idx]).cumprod() * 100
+        if not idx.empty:
+            comp["Benchmark"] = (1 + b_ret.loc[idx]).cumprod() * 100
 
     comp_df = pd.DataFrame(comp)
 
@@ -171,33 +204,62 @@ def calculate_portfolio_metrics(history, benchmark):
 
 
 # ============================================================
-# MONTE CARLO SIMULATION
+# MONTE CARLO SIMULATION (robust)
 # ============================================================
 
 def run_monte_carlo(history, weights, current_val, days=90, sims=200):
-    if history.empty:
-        return pd.DataFrame()
+    """
+    Returns a DataFrame with index 0..days and sims columns 'Sim 0', 'Sim 1', ...
+    Each column is a numeric path with length days+1 (including day 0 = current_val).
+    This function will always return a non-empty DataFrame of numeric dtype.
+    """
+    # Defensive: ensure days >= 1 and sims >= 1
+    days = max(1, int(days))
+    sims = max(1, int(sims))
+
+    # If history is empty or not useful, generate flat deterministic sims (repeat current_val)
+    if history.empty or not isinstance(history, (pd.DataFrame, pd.Series)) or history.shape[1] < 1:
+        # Build deterministic flat paths so UI computations won't fail
+        base = [float(current_val)] * (days + 1)
+        sim = {f"Sim {i}": list(base) for i in range(sims)}
+        df = pd.DataFrame(sim)
+        df.index = list(range(days + 1))
+        return df.astype(float)
 
     ret = history.pct_change().dropna()
-    port = pd.Series(0, index=ret.index)
+    port = pd.Series(0.0, index=ret.index)
 
-    total_w = sum(weights.values()) or 1
+    total_w = sum(weights.values()) or 1.0
 
     for t, w in weights.items():
         if t in ret.columns:
-            port += ret[t] * (w / total_w)
+            try:
+                port += ret[t] * (w / total_w)
+            except Exception:
+                # ignore asset if broadcast fails
+                continue
 
-    mu = port.mean()
-    sigma = port.std()
+    # If port is all zeros or degenerate, fallback
+    if port.empty or port.std() == 0:
+        mu = 0.0
+        sigma = 0.0
+    else:
+        mu = port.mean()
+        sigma = port.std()
 
     sim = {}
-
     for i in range(sims):
+        # generate geometric brownian-like multiplicative shocks
         shocks = np.random.normal(0, 1, days)
-        path = [current_val]
+        path = [float(current_val)]
         for s in shocks:
-            growth = np.exp((mu - 0.5 * sigma**2) + sigma * s)
+            # If sigma is zero, growth becomes 1 (no change)
+            growth = np.exp((mu - 0.5 * sigma ** 2) + sigma * s) if sigma != 0 else 1.0
             path.append(path[-1] * growth)
         sim[f"Sim {i}"] = path
 
-    return pd.DataFrame(sim)
+    df = pd.DataFrame(sim)
+    df.index = list(range(days + 1))
+    # Ensure numeric dtype
+    df = df.apply(pd.to_numeric, errors="coerce").fillna(method="ffill").fillna(float(current_val))
+    return df.astype(float)
