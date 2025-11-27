@@ -149,6 +149,14 @@ if run_btn and len(holdings) > 0:
         volatility, correlation, div_score, comparison_df = calculate_portfolio_metrics(history, benchmark)
 
         st.write("Running Monte Carlo Simulations...")
+        # DEBUG: show dataframe content
+        st.write("Fundamentals DataFrame:")
+        st.write(fundamentals)
+
+        # DEBUG: show all column names
+        st.write("Columns in fundamentals:")
+        st.write(fundamentals.columns)
+
         weights = dict(zip(fundamentals['Ticker'], fundamentals['Position Value']))
         total_val = fundamentals['Position Value'].sum()
         sim_df = run_monte_carlo(history, weights, total_val, days=sim_days)
