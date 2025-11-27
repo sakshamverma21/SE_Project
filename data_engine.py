@@ -3,143 +3,125 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-RAPID_KEY = st.secrets["RAPIDAPI_KEY"]
-
-BASE_SUMMARY = "https://yh-finance.p.rapidapi.com/stock/v2/get-summary"
-BASE_CHART = "https://yh-finance.p.rapidapi.com/stock/v3/get-chart"
+API_KEY = st.secrets["ALPHA_KEY"]
 
 
 # ============================================================
-# 1. REAL-TIME PRICE + FUNDAMENTALS
+# REAL-TIME PRICE
 # ============================================================
 
-def get_realtime_data(ticker):
-    """
-    Gets REAL price + sector + summary using RapidAPI Yahoo Finance.
-    Works 100% on Streamlit Cloud.
-    """
-    params = {"symbol": ticker, "region": "US"}
-    headers = {
-        "X-RapidAPI-Key": RAPID_KEY,
-        "X-RapidAPI-Host": "yh-finance.p.rapidapi.com"
-    }
+def get_live_price(ticker):
+    url = (
+        f"https://www.alphavantage.co/query?"
+        f"function=GLOBAL_QUOTE&symbol={ticker}&apikey={API_KEY}"
+    )
+    r = requests.get(url).json()
 
-    r = requests.get(BASE_SUMMARY, headers=headers, params=params)
-    data = r.json()
+    if "Global Quote" not in r:
+        return None
 
-    price = data["price"]["regularMarketPrice"]["raw"]
-    sector = data["assetProfile"]["sector"]
-    market_cap = data["price"].get("marketCap", {}).get("raw", None)
-    beta = data.get("defaultKeyStatistics", {}).get("beta", {}).get("raw", None)
-
-    return {
-        "price": float(price),
-        "sector": sector,
-        "market_cap": market_cap,
-        "beta": beta
-    }
+    try:
+        return float(r["Global Quote"]["05. price"])
+    except:
+        return None
 
 
 # ============================================================
-# 2. HISTORICAL DATA (needed for charts, volatility, Monte Carlo)
+# HISTORICAL (DAILY OHLC)
 # ============================================================
 
-def get_history(ticker, period="1y", interval="1d"):
-    """
-    Robust chart endpoint from RapidAPI.
-    Provides OHLC + close prices.
-    """
-    params = {
-        "symbol": ticker,
-        "interval": interval,
-        "range": period,
-        "region": "US"
-    }
-    headers = {
-        "X-RapidAPI-Key": RAPID_KEY,
-        "X-RapidAPI-Host": "yh-finance.p.rapidapi.com"
-    }
+def get_history(ticker):
+    url = (
+        f"https://www.alphavantage.co/query?"
+        f"function=TIME_SERIES_DAILY_ADJUSTED&symbol={ticker}&outputsize=full&apikey={API_KEY}"
+    )
 
-    r = requests.get(BASE_CHART, headers=headers, params=params)
-    data = r.json()
+    r = requests.get(url).json()
 
-    if "chart" not in data or data["chart"]["result"] is None:
+    if "Time Series (Daily)" not in r:
         return pd.Series(dtype=float)
 
-    result = data["chart"]["result"][0]
-    timestamps = result["timestamp"]
-    closes = result["indicators"]["quote"][0]["close"]
+    df = (
+        pd.DataFrame(r["Time Series (Daily)"])
+        .T.rename(columns={"5. adjusted close": "Close"})
+    )
 
-    df = pd.DataFrame({"Close": closes}, index=pd.to_datetime(timestamps, unit="s"))
-    df.index.name = "Date"
-    df = df.dropna()
+    df.index = pd.to_datetime(df.index)
+    df["Close"] = pd.to_numeric(df["Close"], errors="coerce")
 
-    return df["Close"]
+    df = df.sort_index()
+    return df["Close"].dropna()
 
 
 def get_history_multi(tickers):
     frames = []
     for t in tickers:
         h = get_history(t)
-        if h.empty:
-            continue
-        frames.append(h.rename(t))
-    if not frames:
-        return pd.DataFrame()
-    return pd.concat(frames, axis=1).dropna()
+        if not h.empty:
+            frames.append(h.rename(t))
+    if frames:
+        return pd.concat(frames, axis=1).dropna()
+    return pd.DataFrame()
 
 
 # ============================================================
-# 3. MAIN MARKET FETCH FUNCTION
+# BASIC SECTOR LOOKUP (static fallback)
+# ============================================================
+
+STATIC_SECTORS = {
+    "AAPL": "Technology",
+    "MSFT": "Technology",
+    "GOOGL": "Communication Services",
+    "AMZN": "Consumer Discretionary",
+    "TSLA": "Consumer Discretionary",
+    "NVDA": "Technology",
+}
+
+def get_sector(ticker):
+    return STATIC_SECTORS.get(ticker.upper(), "Unknown")
+
+
+# ============================================================
+# MAIN MARKET FETCH FUNCTION
 # ============================================================
 
 def fetch_market_data(holdings):
-    """
-    holdings = {
-        "AAPL": {"qty": 10, "buy_price": 150},
-        ...
-    }
-    """
     tickers = list(holdings.keys())
 
-    # 1) HISTORY FOR PORTFOLIO
+    # 1) History
     history = get_history_multi(tickers)
 
-    # 2) BENCHMARK
-    try:
-        benchmark = get_history("^GSPC")
-    except:
-        benchmark = None
+    # 2) Benchmark (S&P500 ETF: SPY)
+    benchmark = get_history("SPY")  # SPY is very close to S&P500
 
-    # 3) FUNDAMENTALS TABLE
+    # 3) Fundamentals
     fundamentals_list = []
     sectors_map = {}
 
     for ticker, data in holdings.items():
         qty = float(data["qty"])
-        buy_price = float(data["buy_price"])
+        buy = float(data["buy_price"])
 
-        realtime = get_realtime_data(ticker)
-        price = realtime["price"]
-        sector = realtime["sector"]
+        price = get_live_price(ticker)
+        if price is None:
+            price = buy
 
-        current_val = price * qty
-        cost_basis = buy_price * qty
-        pnl = current_val - cost_basis
+        value = price * qty
+        cost = buy * qty
+        pnl = value - cost
 
+        sector = get_sector(ticker)
         sectors_map[ticker] = sector
 
         fundamentals_list.append({
             "Ticker": ticker,
             "Quantity": qty,
             "Current Price": price,
-            "Position Value": current_val,
-            "Cost Basis": cost_basis,
+            "Position Value": value,
+            "Cost Basis": cost,
             "Unrealized P&L": pnl,
-            "Return %": (price / buy_price - 1) * 100 if buy_price > 0 else 0,
-            "Sector": sector,
-            "Market Cap": realtime["market_cap"],
-            "Beta": realtime["beta"]
+            "Return %": (price / buy - 1) * 100 if buy > 0 else 0,
+            "Sector": sector
         })
 
     fundamentals = pd.DataFrame(fundamentals_list)
@@ -148,54 +130,40 @@ def fetch_market_data(holdings):
 
 
 # ============================================================
-# 4. PORTFOLIO METRICS (volatility, correlation, diversification, benchmark)
+# PORTFOLIO METRICS
 # ============================================================
 
 def calculate_portfolio_metrics(history, benchmark):
     if history.empty:
-        return (
-            pd.Series(dtype=float),
-            pd.DataFrame(),
-            50,
-            pd.DataFrame()
-        )
-
-    if isinstance(history, pd.Series):
-        history = history.to_frame()
+        return pd.Series(dtype=float), pd.DataFrame(), 0, pd.DataFrame()
 
     returns = history.pct_change().dropna()
-    if returns.empty:
-        return (
-            pd.Series(dtype=float),
-            pd.DataFrame(),
-            50,
-            pd.DataFrame()
-        )
 
     # Volatility
     vol = returns.std() * np.sqrt(252)
 
     # Correlation
-    corr = returns.corr() if returns.shape[1] > 1 else pd.DataFrame([[1.0]], columns=returns.columns, index=returns.columns)
-
-    # Diversification Score
     if returns.shape[1] > 1:
-        avg_corr = corr.values[np.triu_indices_from(corr.values, k=1)].mean()
+        corr = returns.corr()
+    else:
+        corr = pd.DataFrame([[1.0]])
+
+    # Diversification
+    if returns.shape[1] > 1:
+        avg_corr = corr.values[np.triu_indices_from(corr.values, 1)].mean()
     else:
         avg_corr = 1
     div_score = int((1 - avg_corr) * 100)
 
-    # Benchmark Comparison
+    # Benchmark comparison
     port_ret = returns.mean(axis=1)
     port_cum = (1 + port_ret).cumprod() * 100
-
     comp = {"Portfolio": port_cum}
 
     if benchmark is not None and not benchmark.empty:
-        bench_ret = benchmark.pct_change().dropna()
-        idx = port_cum.index.intersection(bench_ret.index)
-        if len(idx) > 0:
-            comp["S&P 500"] = (1 + bench_ret.loc[idx]).cumprod() * 100
+        b_ret = benchmark.pct_change().dropna()
+        idx = port_cum.index.intersection(b_ret.index)
+        comp["Benchmark"] = (1 + b_ret.loc[idx]).cumprod() * 100
 
     comp_df = pd.DataFrame(comp)
 
@@ -203,26 +171,24 @@ def calculate_portfolio_metrics(history, benchmark):
 
 
 # ============================================================
-# 5. MONTE CARLO SIMULATION
+# MONTE CARLO SIMULATION
 # ============================================================
 
 def run_monte_carlo(history, weights, current_val, days=90, sims=200):
     if history.empty:
         return pd.DataFrame()
 
-    returns = history.pct_change().dropna()
-    if returns.empty:
-        return pd.DataFrame()
+    ret = history.pct_change().dropna()
+    port = pd.Series(0, index=ret.index)
 
-    port_ret = pd.Series(0, index=returns.index)
     total_w = sum(weights.values()) or 1
 
     for t, w in weights.items():
-        if t in returns.columns:
-            port_ret += returns[t] * (w / total_w)
+        if t in ret.columns:
+            port += ret[t] * (w / total_w)
 
-    mu = port_ret.mean()
-    sigma = port_ret.std()
+    mu = port.mean()
+    sigma = port.std()
 
     sim = {}
 
