@@ -63,8 +63,8 @@ def fetch_market_data(holdings):
 
     # --- Download full history ---
     try:
-        raw = yf.download(tickers, period="1y", group_by="ticker", auto_adjust=True)
-        history = download_history(tickers)
+       history = download_history(tickers)
+
 
     except:
         history = pd.DataFrame()
