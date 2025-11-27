@@ -22,44 +22,315 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- CUSTOM CSS ---
+# --- ULTRA-MODERN CSS (React-like) ---
 st.markdown("""
     <style>
+    /* Import Modern Font */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+    
+    /* Hide Streamlit Branding */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    
+    /* Root Variables */
+    :root {
+        --primary: #6366f1;
+        --primary-dark: #4f46e5;
+        --secondary: #8b5cf6;
+        --success: #10b981;
+        --danger: #ef4444;
+        --warning: #f59e0b;
+        --bg-primary: #0f0f23;
+        --bg-secondary: #1a1a2e;
+        --bg-card: #16213e;
+        --text-primary: #ffffff;
+        --text-secondary: #94a3b8;
+        --border: #2d3748;
+        --shadow: rgba(99, 102, 241, 0.15);
+    }
+    
+    /* Base App */
     .stApp {
-        background-color: #0e1117;
-        font-family: 'Inter', 'Segoe UI', sans-serif;
+        background: linear-gradient(135deg, #0f0f23 0%, #1a1a2e 50%, #16213e 100%);
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     }
-
-    h1, h2, h3 {
-        color: #f0f2f6;
-        font-weight: 600;
+    
+    /* Remove Default Padding */
+    .block-container {
+        padding: 2rem 3rem !important;
+        max-width: 100% !important;
     }
-
-    .metric-card {
-        background-color: #1e2127;
-        border: 1px solid #2e333d;
-        border-radius: 8px;
-        padding: 20px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    }
-
+    
+    /* Hide Sidebar Default Styling */
     section[data-testid="stSidebar"] {
-        background-color: #161920;
-        border-right: 1px solid #2e333d;
+        background: rgba(22, 33, 62, 0.95) !important;
+        backdrop-filter: blur(20px);
+        border-right: 1px solid rgba(148, 163, 184, 0.1);
+        box-shadow: 4px 0 24px rgba(0, 0, 0, 0.3);
     }
-
+    
+    section[data-testid="stSidebar"] > div {
+        padding: 2rem 1.5rem;
+    }
+    
+    /* Gradient Text for Logo */
+    .gradient-text {
+        background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        font-size: 2rem;
+        font-weight: 800;
+        letter-spacing: -0.03em;
+        margin-bottom: 0.5rem;
+    }
+    
+    /* Typography */
+    h1 {
+        color: var(--text-primary) !important;
+        font-weight: 800 !important;
+        font-size: 2.5rem !important;
+        letter-spacing: -0.03em !important;
+        margin-bottom: 0.5rem !important;
+        text-shadow: 0 0 40px rgba(99, 102, 241, 0.3);
+    }
+    
+    h2 {
+        color: var(--text-primary) !important;
+        font-weight: 700 !important;
+        font-size: 1.5rem !important;
+        margin-top: 2rem !important;
+    }
+    
+    h3 {
+        color: var(--text-primary) !important;
+        font-weight: 600 !important;
+        font-size: 1.125rem !important;
+    }
+    
+    /* Glass Card Effect */
+    .glass-card {
+        background: rgba(22, 33, 62, 0.6);
+        backdrop-filter: blur(20px);
+        border: 1px solid rgba(148, 163, 184, 0.1);
+        border-radius: 16px;
+        padding: 2rem;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    
+    .glass-card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 16px 48px rgba(99, 102, 241, 0.2);
+        border-color: rgba(99, 102, 241, 0.3);
+    }
+    
+    /* Metric Cards */
+    [data-testid="stMetric"] {
+        background: linear-gradient(135deg, rgba(22, 33, 62, 0.8) 0%, rgba(26, 26, 46, 0.8) 100%);
+        backdrop-filter: blur(20px);
+        border: 1px solid rgba(148, 163, 184, 0.1);
+        border-radius: 16px;
+        padding: 1.75rem !important;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        transition: all 0.3s ease;
+    }
+    
+    [data-testid="stMetric"]:hover {
+        transform: translateY(-4px) scale(1.02);
+        box-shadow: 0 16px 48px rgba(99, 102, 241, 0.25);
+        border-color: rgba(99, 102, 241, 0.4);
+    }
+    
+    [data-testid="stMetricLabel"] {
+        color: var(--text-secondary) !important;
+        font-size: 0.813rem !important;
+        font-weight: 600 !important;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+    }
+    
+    [data-testid="stMetricValue"] {
+        color: var(--text-primary) !important;
+        font-size: 2.25rem !important;
+        font-weight: 800 !important;
+        text-shadow: 0 0 20px rgba(99, 102, 241, 0.3);
+    }
+    
+    [data-testid="stMetricDelta"] {
+        font-weight: 600 !important;
+    }
+    
+    /* Modern Tabs */
+    .stTabs {
+        background: transparent;
+        padding: 0;
+    }
+    
     .stTabs [data-baseweb="tab-list"] {
-        border-bottom: 1px solid #2e333d;
+        gap: 0.5rem;
+        background: rgba(22, 33, 62, 0.4);
+        backdrop-filter: blur(10px);
+        border-radius: 12px;
+        padding: 0.5rem;
+        border: 1px solid rgba(148, 163, 184, 0.1);
     }
-
-    .stButton button {
-        border-radius: 4px;
+    
+    .stTabs [data-baseweb="tab"] {
+        background: transparent;
+        border-radius: 8px;
+        color: var(--text-secondary);
         font-weight: 600;
-        background-color: #0969da;
+        padding: 0.75rem 1.5rem;
+        border: none;
+        transition: all 0.2s ease;
     }
-
-    .stButton button:hover {
-        background-color: #0860ca;
+    
+    .stTabs [data-baseweb="tab"]:hover {
+        background: rgba(99, 102, 241, 0.1);
+        color: var(--text-primary);
+    }
+    
+    .stTabs [aria-selected="true"] {
+        background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%) !important;
+        color: white !important;
+        box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+    }
+    
+    /* Button Styling */
+    .stButton > button {
+        width: 100%;
+        background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+        color: white;
+        border: none;
+        border-radius: 12px;
+        padding: 1rem 2rem;
+        font-weight: 700;
+        font-size: 1rem;
+        letter-spacing: 0.02em;
+        box-shadow: 0 8px 24px rgba(99, 102, 241, 0.4);
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        text-transform: none;
+    }
+    
+    .stButton > button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 12px 32px rgba(99, 102, 241, 0.5);
+        background: linear-gradient(135deg, var(--primary-dark) 0%, var(--primary) 100%);
+    }
+    
+    .stButton > button:active {
+        transform: translateY(0);
+    }
+    
+    /* Data Editor */
+    [data-testid="stDataFrame"], .stDataFrame {
+        background: rgba(22, 33, 62, 0.6) !important;
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(148, 163, 184, 0.1) !important;
+        border-radius: 12px !important;
+    }
+    
+    /* Input Fields */
+    .stTextInput > div > div > input,
+    .stNumberInput > div > div > input {
+        background: rgba(22, 33, 62, 0.6);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 8px;
+        color: var(--text-primary);
+        padding: 0.75rem;
+        transition: all 0.2s ease;
+    }
+    
+    .stTextInput > div > div > input:focus,
+    .stNumberInput > div > div > input:focus {
+        border-color: var(--primary);
+        box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+    }
+    
+    /* Slider */
+    .stSlider > div > div > div {
+        background: var(--primary) !important;
+    }
+    
+    /* Info/Warning/Success Boxes */
+    .stAlert {
+        background: rgba(22, 33, 62, 0.6);
+        backdrop-filter: blur(20px);
+        border: 1px solid rgba(148, 163, 184, 0.1);
+        border-radius: 12px;
+        border-left: 4px solid var(--primary);
+    }
+    
+    /* Divider */
+    hr {
+        border-color: rgba(148, 163, 184, 0.1) !important;
+        margin: 2rem 0 !important;
+    }
+    
+    /* Status Badge */
+    .status-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.5rem 1rem;
+        background: rgba(16, 185, 129, 0.1);
+        border: 1px solid rgba(16, 185, 129, 0.3);
+        border-radius: 9999px;
+        color: var(--success);
+        font-size: 0.875rem;
+        font-weight: 600;
+    }
+    
+    .status-dot {
+        width: 8px;
+        height: 8px;
+        background: var(--success);
+        border-radius: 50%;
+        animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+    
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+    }
+    
+    /* Plotly Chart Containers */
+    .js-plotly-plot {
+        border-radius: 16px !important;
+        overflow: hidden;
+    }
+    
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+    }
+    
+    ::-webkit-scrollbar-track {
+        background: var(--bg-secondary);
+    }
+    
+    ::-webkit-scrollbar-thumb {
+        background: var(--primary);
+        border-radius: 4px;
+    }
+    
+    ::-webkit-scrollbar-thumb:hover {
+        background: var(--primary-dark);
+    }
+    
+    /* Loading Spinner */
+    .stSpinner > div {
+        border-top-color: var(--primary) !important;
+    }
+    
+    /* Caption Styling */
+    .caption {
+        color: var(--text-secondary);
+        font-size: 0.875rem;
+        font-weight: 500;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -84,11 +355,11 @@ if "analysis_results" not in st.session_state:
 
 # --- SIDEBAR: PORTFOLIO INPUT ---
 with st.sidebar:
-    st.title("📈 IntelliQuant")
-    st.caption("AI-Powered Portfolio Intelligence")
+    st.markdown('<div class="gradient-text">IntelliQuant</div>', unsafe_allow_html=True)
+    st.markdown('<p class="caption">AI-Powered Portfolio Intelligence</p>', unsafe_allow_html=True)
     st.markdown("---")
 
-    st.subheader("Portfolio Composition")
+    st.markdown("### Portfolio Composition")
 
     # Default portfolio
     default_data = pd.DataFrame([
@@ -126,18 +397,22 @@ with st.sidebar:
     sim_days = st.slider("Forecast Horizon (Days)", 30, 365, 90, step=10)
 
     st.markdown("---")
-    run_analysis = st.button(
-        "🚀 Initialize Analysis",
-        type="primary",
-        use_container_width=True
-    )
+    run_analysis = st.button("🚀 Initialize Analysis", type="primary")
 
     st.markdown("---")
-    st.caption("v2.0.0 | Production Build")
+    st.markdown('<p class="caption">v2.0.0 | Production Build</p>', unsafe_allow_html=True)
 
 # --- MAIN DASHBOARD ---
-st.title("Portfolio Command Center")
-st.markdown(f"📅 {datetime.now().strftime('%B %d, %Y')} | 🟢 Market Active")
+st.markdown(f'<h1>Portfolio Command Center</h1>', unsafe_allow_html=True)
+st.markdown(f'''
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 2rem;">
+        <span class="caption">📅 {datetime.now().strftime('%B %d, %Y')}</span>
+        <span class="status-badge">
+            <span class="status-dot"></span>
+            Market Active
+        </span>
+    </div>
+''', unsafe_allow_html=True)
 
 # --- RUN ANALYSIS ---
 if run_analysis and len(holdings) > 0:
@@ -264,7 +539,7 @@ Avg Correlation: {correlation.values[0, 1] if correlation.shape[0] > 1 else 0:.2
 if st.session_state.analysis_complete and st.session_state.analysis_results:
     res = st.session_state.analysis_results
 
-    # KPI Row
+    # KPI Row with modern cards
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
@@ -275,11 +550,11 @@ if st.session_state.analysis_complete and st.session_state.analysis_results:
         )
 
     with col2:
+        delta_color = "normal" if res['pnl_pct'] >= 0 else "inverse"
         st.metric(
             "Total P&L",
             f"${res['total_pnl']:,.0f}",
-            delta=f"{res['pnl_pct']:.1f}%",
-            delta_color="off"
+            delta=f"{res['pnl_pct']:.1f}%"
         )
 
     with col3:
@@ -297,9 +572,9 @@ if st.session_state.analysis_complete and st.session_state.analysis_results:
             help="Risk-adjusted returns"
         )
 
-    st.markdown("---")
+    st.markdown("<br>", unsafe_allow_html=True)
 
-    # Tabs
+    # Modern Tabs
     tab_strat, tab_intel, tab_risk, tab_data = st.tabs([
         "📋 Strategy",
         "📰 Intelligence",
@@ -312,31 +587,44 @@ if st.session_state.analysis_complete and st.session_state.analysis_results:
         col_advice, col_alloc = st.columns([2, 1])
 
         with col_advice:
-            st.subheader("Chief Investment Officer Verdict")
+            st.markdown("### Chief Investment Officer Verdict")
             st.info(res['advice_report'])
 
         with col_alloc:
-            st.subheader("Asset Allocation")
+            st.markdown("### Asset Allocation")
             fig_pie = px.pie(
                 res['fundamentals'],
                 values='Position Value',
                 names='Ticker',
-                hole=0.4
+                hole=0.5,
+                color_discrete_sequence=px.colors.sequential.Plasma
             )
-            fig_pie.update_layout(height=350, margin=dict(t=0, b=0, l=0, r=0))
+            fig_pie.update_layout(
+                height=350,
+                margin=dict(t=20, b=0, l=0, r=0),
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                font=dict(color='#f0f2f6')
+            )
             st.plotly_chart(fig_pie, use_container_width=True)
 
-            st.subheader("Sector Breakdown")
+            st.markdown("### Sector Breakdown")
             fig_sector = px.bar(
                 res['fundamentals'],
                 x='Sector',
                 y='Position Value',
-                color='Sector'
+                color='Sector',
+                color_discrete_sequence=px.colors.sequential.Viridis
             )
             fig_sector.update_layout(
                 showlegend=False,
                 height=250,
-                margin=dict(t=0, b=0, l=0, r=0)
+                margin=dict(t=0, b=0, l=0, r=0),
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                font=dict(color='#f0f2f6'),
+                xaxis=dict(showgrid=False),
+                yaxis=dict(showgrid=True, gridcolor='rgba(148, 163, 184, 0.1)')
             )
             st.plotly_chart(fig_sector, use_container_width=True)
 
@@ -345,38 +633,40 @@ if st.session_state.analysis_complete and st.session_state.analysis_results:
         col1, col2 = st.columns(2)
 
         with col1:
-            st.subheader("Market Sentiment")
+            st.markdown("### Market Sentiment")
             st.markdown(res['news_summary'])
 
         with col2:
-            st.subheader("Diversification Opportunities")
+            st.markdown("### Diversification Opportunities")
             st.markdown(res['rec_summary'])
 
     # TAB 3: Risk
     with tab_risk:
-        st.subheader("Monte Carlo Simulation (90-Day Forecast)")
+        st.markdown("### Monte Carlo Simulation")
 
         sim_df = res['sim_df']
         sim_days = res['sim_days']
 
         fig_mc = go.Figure()
 
-        # Plot all simulations
-        for col in sim_df.columns[:50]:
+        # Plot simulations with gradient
+        for i, col in enumerate(sim_df.columns[:50]):
+            opacity = 0.05 + (i / 50) * 0.05
             fig_mc.add_trace(go.Scatter(
                 y=sim_df[col],
                 mode='lines',
-                line=dict(width=1, color='rgba(100,100,100,0.1)'),
-                showlegend=False
+                line=dict(width=1, color=f'rgba(99, 102, 241, {opacity})'),
+                showlegend=False,
+                hoverinfo='skip'
             ))
 
-        # Median
+        # Median line
         median_line = sim_df.median(axis=1)
         fig_mc.add_trace(go.Scatter(
             y=median_line,
             name='Median',
             mode='lines',
-            line=dict(color='#3498db', width=3)
+            line=dict(color='#6366f1', width=4)
         ))
 
         # Percentiles
@@ -386,22 +676,34 @@ if st.session_state.analysis_complete and st.session_state.analysis_results:
         fig_mc.add_trace(go.Scatter(
             y=p95,
             name='95th Percentile',
-            line=dict(color='#2ecc71', width=2, dash='dash')
+            line=dict(color='#10b981', width=3, dash='dot')
         ))
 
         fig_mc.add_trace(go.Scatter(
             y=p05,
             name='5th Percentile',
-            line=dict(color='#e74c3c', width=2, dash='dash')
+            line=dict(color='#ef4444', width=3, dash='dot')
         ))
 
         fig_mc.update_layout(
-            title=f"Portfolio Value Forecast ({sim_days} Days)",
+            title=dict(
+                text=f"Portfolio Value Forecast ({sim_days} Days)",
+                font=dict(size=20, color='#f0f2f6')
+            ),
             xaxis_title="Days",
             yaxis_title="Portfolio Value ($)",
-            template="plotly_dark",
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(22, 33, 62, 0.3)',
+            font=dict(color='#f0f2f6'),
             height=500,
-            hovermode="x unified"
+            hovermode="x unified",
+            xaxis=dict(showgrid=False),
+            yaxis=dict(showgrid=True, gridcolor='rgba(148, 163, 184, 0.1)'),
+            legend=dict(
+                bgcolor='rgba(22, 33, 62, 0.8)',
+                bordercolor='rgba(148, 163, 184, 0.2)',
+                borderwidth=1
+            )
         )
 
         st.plotly_chart(fig_mc, use_container_width=True)
@@ -410,51 +712,37 @@ if st.session_state.analysis_complete and st.session_state.analysis_results:
         col1, col2 = st.columns(2)
 
         with col1:
-            st.subheader("Risk Assessment")
+            st.markdown("### Risk Assessment")
             st.warning(res['risk_report'])
 
         with col2:
-            st.subheader("Projected Outcomes")
+            st.markdown("### Projected Outcomes")
             final_vals = sim_df.iloc[-1]
             tv = res['total_val']
 
-            st.write("| Scenario | Value | Change |")
-            st.write("|:---|---:|---:|")
-            st.write(f"| Optimistic (95%) | ${final_vals.quantile(0.95):,.0f} | +{(final_vals.quantile(0.95)/tv-1)*100:.1f}% |")
-            st.write(f"| Base (Median) | ${final_vals.median():,.0f} | +{(final_vals.median()/tv-1)*100:.1f}% |")
-            st.write(f"| Pessimistic (5%) | ${final_vals.quantile(0.05):,.0f} | {(final_vals.quantile(0.05)/tv-1)*100:.1f}% |")
+            outcomes_data = pd.DataFrame({
+                'Scenario': ['Optimistic (95%)', 'Base (Median)', 'Pessimistic (5%)'],
+                'Value': [
+                    f"${final_vals.quantile(0.95):,.0f}",
+                    f"${final_vals.median():,.0f}",
+                    f"${final_vals.quantile(0.05):,.0f}"
+                ],
+                'Change': [
+                    f"+{(final_vals.quantile(0.95)/tv-1)*100:.1f}%",
+                    f"+{(final_vals.median()/tv-1)*100:.1f}%",
+                    f"{(final_vals.quantile(0.05)/tv-1)*100:.1f}%"
+                ]
+            })
+            
+            st.dataframe(outcomes_data, use_container_width=True, hide_index=True)
 
     # TAB 4: Data
     with tab_data:
-        st.subheader("Holdings Fundamentals")
+        st.markdown("### Holdings Fundamentals")
         st.dataframe(res['fundamentals'], use_container_width=True, hide_index=True)
 
-        st.subheader("Correlation Matrix")
+        st.markdown("### Correlation Matrix")
         st.dataframe(
-            res['correlation'].style.background_gradient(cmap='RdBu', vmin=-1, vmax=1),
+            res['correlation'].style.background_gradient(cmap='RdBu_r', vmin=-1, vmax=1),
             use_container_width=True
         )
-
-        if not res['comparison_df'].empty:
-            st.subheader("Performance vs Benchmark")
-            fig_comp = go.Figure()
-
-            for col in res['comparison_df'].columns:
-                fig_comp.add_trace(go.Scatter(
-                    y=res['comparison_df'][col],
-                    name=col,
-                    mode='lines'
-                ))
-
-            fig_comp.update_layout(
-                title="Portfolio vs S&P 500 (1-Year)",
-                xaxis_title="Date",
-                yaxis_title="Cumulative Return (%)",
-                template="plotly_dark",
-                height=400
-            )
-
-            st.plotly_chart(fig_comp, use_container_width=True)
-
-else:
-    st.info("👈 Add stocks in the sidebar and click 'Initialize Analysis' to begin.")
