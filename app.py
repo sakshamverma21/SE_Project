@@ -2,29 +2,39 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import logging
 from datetime import datetime
-from data_engine import fetch_market_data, calculate_portfolio_metrics, run_monte_carlo
+from data_engine import (
+    fetch_market_data,
+    calculate_portfolio_metrics,
+    run_monte_carlo
+)
 from agents import NewsAgent, RiskAgent, AdvisorAgent, RecommenderAgent
-from ai_brain import get_chat_response
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
     page_title="IntelliQuant | AI Investment Suite",
-    page_icon=None,
+    page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# --- CUSTOM CSS FOR PROFESSIONAL UI ---
+# --- CUSTOM CSS ---
 st.markdown("""
     <style>
-    /* Main Background & Font */
     .stApp {
         background-color: #0e1117;
-        font-family: 'Inter', sans-serif;
+        font-family: 'Inter', 'Segoe UI', sans-serif;
     }
 
-    /* Card Styling */
+    h1, h2, h3 {
+        color: #f0f2f6;
+        font-weight: 600;
+    }
+
     .metric-card {
         background-color: #1e2127;
         border: 1px solid #2e333d;
@@ -33,50 +43,28 @@ st.markdown("""
         box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     }
 
-    /* Headers */
-    h1, h2, h3 {
-        color: #f0f2f6;
-        font-weight: 600;
-        font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-    }
-
-    /* Custom Success/Warning/Error Messages */
-    .stAlert {
-        border-radius: 4px;
-        border: 1px solid rgba(255,255,255,0.1);
-    }
-
-    /* Sidebar Styling */
     section[data-testid="stSidebar"] {
         background-color: #161920;
         border-right: 1px solid #2e333d;
     }
 
-    /* Tabs */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 24px;
         border-bottom: 1px solid #2e333d;
     }
-    .stTabs [data-baseweb="tab"] {
-        height: 50px;
-        white-space: pre-wrap;
-        background-color: transparent;
-        border-radius: 4px 4px 0px 0px;
-        gap: 1px;
-        padding-top: 10px;
-        padding-bottom: 10px;
-        font-weight: 500;
-    }
 
-    /* Buttons */
     .stButton button {
         border-radius: 4px;
         font-weight: 600;
+        background-color: #0969da;
+    }
+
+    .stButton button:hover {
+        background-color: #0860ca;
     }
     </style>
     """, unsafe_allow_html=True)
 
-# --- INITIALIZE AGENTS ---
+# --- INITIALIZE SESSION STATE ---
 if 'team' not in st.session_state:
     st.session_state.team = {
         'news': NewsAgent(),
@@ -85,296 +73,388 @@ if 'team' not in st.session_state:
         'rec': RecommenderAgent()
     }
 
-# --- INITIALIZE CHAT HISTORY ---
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
 if "analysis_complete" not in st.session_state:
     st.session_state.analysis_complete = False
 
-# --- SIDEBAR: CONFIGURATION ---
+if "analysis_results" not in st.session_state:
+    st.session_state.analysis_results = None
+
+# --- SIDEBAR: PORTFOLIO INPUT ---
 with st.sidebar:
-    st.title("IntelliQuant")
+    st.title("📈 IntelliQuant")
     st.caption("AI-Powered Portfolio Intelligence")
     st.markdown("---")
 
     st.subheader("Portfolio Composition")
 
-    # Default Portfolio
+    # Default portfolio
     default_data = pd.DataFrame([
         {"Ticker": "AAPL", "Quantity": 10, "Avg Buy Price": 150.0},
         {"Ticker": "MSFT", "Quantity": 5, "Avg Buy Price": 300.0},
-        {"Ticker": "NVDA", "Quantity": 8, "Avg Buy Price": 400.0},
-        {"Ticker": "GOOGL", "Quantity": 12, "Avg Buy Price": 120.0}
+        {"Ticker": "GOOGL", "Quantity": 8, "Avg Buy Price": 120.0},
+        {"Ticker": "NVDA", "Quantity": 4, "Avg Buy Price": 400.0},
+        {"Ticker": "TSLA", "Quantity": 3, "Avg Buy Price": 200.0},
     ])
 
+    # Data editor for portfolio
     edited_df = st.data_editor(
         default_data,
         num_rows="dynamic",
         use_container_width=True,
         hide_index=True,
         column_config={
-            "Ticker": st.column_config.TextColumn("Ticker", help="Stock Symbol (e.g. AAPL)", validate="^[A-Za-z]+$"),
+            "Ticker": st.column_config.TextColumn("Ticker", help="Stock Symbol"),
             "Quantity": st.column_config.NumberColumn("Qty", min_value=0.01, format="%.2f"),
-            "Avg Buy Price": st.column_config.NumberColumn("Buy Price", min_value=0.0, format="$%.2f")
+            "Avg Buy Price": st.column_config.NumberColumn("Buy Price ($)", min_value=0.0, format="%.2f")
         }
     )
 
+    # Convert to holdings dict
     holdings = {}
-    for index, row in edited_df.iterrows():
-        if row["Ticker"] and row["Quantity"] > 0:
-            holdings[row["Ticker"].strip().upper()] = {
-                "qty": row["Quantity"],
-                "buy_price": row.get("Avg Buy Price", 0)
-            }
+    for _, row in edited_df.iterrows():
+        ticker = row["Ticker"].strip().upper() if pd.notna(row["Ticker"]) else None
+        qty = float(row["Quantity"]) if pd.notna(row["Quantity"]) and row["Quantity"] > 0 else 0
+        price = float(row["Avg Buy Price"]) if pd.notna(row["Avg Buy Price"]) else 0
+
+        if ticker and qty > 0:
+            holdings[ticker] = {"qty": qty, "buy_price": price}
 
     st.markdown("### Simulation Settings")
-    sim_days = st.slider("Forecast Horizon (Days)", 30, 365, 90)
+    sim_days = st.slider("Forecast Horizon (Days)", 30, 365, 90, step=10)
 
     st.markdown("---")
-    run_btn = st.button("Initialize Analysis", type="primary", use_container_width=True)
-    st.markdown("v2.0.0 | Production Build")
+    run_analysis = st.button(
+        "🚀 Initialize Analysis",
+        type="primary",
+        use_container_width=True
+    )
+
+    st.markdown("---")
+    st.caption("v2.0.0 | Production Build")
 
 # --- MAIN DASHBOARD ---
 st.title("Portfolio Command Center")
-st.markdown(f"**Date:** {datetime.now().strftime('%B %d, %Y')} | **Market Status:** Active")
+st.markdown(f"📅 {datetime.now().strftime('%B %d, %Y')} | 🟢 Market Active")
 
-# --- LOGIC: RUN ANALYSIS ---
-if run_btn and len(holdings) > 0:
-    with st.status("Orchestrating AI Agents...", expanded=True) as status:
-        st.write("Connecting to Market Data Engine...")
-        history, benchmark, fundamentals, news = fetch_market_data(holdings)
+# --- RUN ANALYSIS ---
+if run_analysis and len(holdings) > 0:
+    with st.spinner("🤖 Orchestrating AI Agents..."):
+        try:
+            # Step 1: Fetch market data
+            st.info("📊 Fetching market data...")
+            history, benchmark, fundamentals, sectors_map = fetch_market_data(holdings)
 
-        st.write("Calculating Quantitative Metrics...")
-        volatility, correlation, div_score, comparison_df = calculate_portfolio_metrics(history, benchmark)
+            if fundamentals.empty:
+                st.error("❌ Could not fetch market data. Check tickers and try again.")
+                st.stop()
 
-        st.write("Running Monte Carlo Simulations...")
-        # DEBUG: show dataframe content
-        st.write("Fundamentals DataFrame:")
-        st.write(fundamentals)
+            # Step 2: Calculate metrics
+            st.info("📈 Calculating portfolio metrics...")
+            volatility, correlation, div_score, comparison_df = calculate_portfolio_metrics(
+                history, benchmark
+            )
 
-        # DEBUG: show all column names
-        st.write("Columns in fundamentals:")
-        st.write(fundamentals.columns)
+            # Step 3: Run Monte Carlo
+            st.info("🎲 Running Monte Carlo simulations...")
+            weights = dict(zip(fundamentals['Ticker'], fundamentals['Position Value']))
+            total_val = fundamentals['Position Value'].sum()
 
-        weights = dict(zip(fundamentals['Ticker'], fundamentals['Position Value']))
-        total_val = fundamentals['Position Value'].sum()
-        sim_df = run_monte_carlo(history, weights, total_val, days=sim_days)
+            if total_val > 0:
+                sim_df = run_monte_carlo(history, weights, total_val, days=sim_days, sims=200)
+            else:
+                st.error("Portfolio has no valid positions.")
+                st.stop()
 
-        # Calculate KPIs
-        total_cost = fundamentals['Cost Basis'].sum()
-        total_pnl = total_val - total_cost
-        pnl_pct = (total_pnl / total_cost) * 100 if total_cost > 0 else 0
-        sharpe = (pnl_pct / 100) / (volatility.mean() if not isinstance(volatility, float) else volatility)
+            # Step 4: Calculate KPIs
+            total_cost = fundamentals['Cost Basis'].sum()
+            total_pnl = total_val - total_cost
+            pnl_pct = (total_pnl / total_cost * 100) if total_cost > 0 else 0
 
-        # Generate AI Reports
-        advisor_context = f"""
-        Portfolio Value: ${total_val:,.2f}
-        Total P&L: ${total_pnl:,.2f} ({pnl_pct:.1f}%)
-        Diversification Score: {div_score}/100
-        Holdings: {list(holdings.keys())}
-        """
+            # Calculate Sharpe (simplified)
+            avg_vol = volatility.mean() if hasattr(volatility, 'mean') else volatility
+            sharpe = (pnl_pct / 100) / max(avg_vol, 0.001) if avg_vol > 0 else 0
 
-        st.write("Generating Strategic Reports...")
-        prompt = f"""
-        Analyze this portfolio and output your answer strictly in the following format. Do not use emojis.
+            # Step 5: Generate AI reports
+            st.info("🤖 Generating strategic reports...")
 
-        ### Strategic Score: {div_score}/100
+            # Advisor context
+            advisor_context = f"""
+Portfolio Analysis Summary:
+- Total Value: ${total_val:,.2f}
+- Total P&L: ${total_pnl:,.2f} ({pnl_pct:.1f}%)
+- Diversification Score: {div_score}/100
+- Portfolio Volatility: {avg_vol:.2%}
+- Holdings: {list(holdings.keys())}
 
-        ### Strengths
-        * [Point 1]
-        * [Point 2]
+Holdings Breakdown:
+{fundamentals.to_string(index=False)}
+"""
 
-        ### Weaknesses
-        * [Point 1]
-        * [Point 2]
+            advisor_prompt = f"""
+Analyze this portfolio and output strictly in this format:
 
-        ### Executive Decision
-        **[BUY / SELL / HOLD]** - [Professional justification]
-        """
-        advice_report = st.session_state.team['advisor'].run(advisor_context, prompt)
+### Strategic Score: {div_score}/100
 
-        ticker_list = ", ".join(list(holdings.keys()))
-        news_summary = st.session_state.team['news'].run(ticker_list, "Summarize latest market sentiment and specific news for these tickers. Do not use emojis.")
+### Strengths
+* [Key strength 1]
+* [Key strength 2]
 
-        rec_summary = st.session_state.team['rec'].run(advisor_context)
+### Weaknesses
+* [Risk or concern 1]
+* [Risk or concern 2]
 
-        risk_context = f"Vol: {volatility.to_dict() if hasattr(volatility, 'to_dict') else volatility}, Corr: {correlation.to_dict() if hasattr(correlation, 'to_dict') else correlation}"
-        risk_report = st.session_state.team['risk'].run(risk_context, "Identify key portfolio risks. Do not use emojis.")
+### Executive Decision
+**[BUY / SELL / HOLD]** - [Professional justification]
+"""
 
-        # SAVE EVERYTHING TO SESSION STATE
-        st.session_state.results = {
-            "total_val": total_val,
-            "total_pnl": total_pnl,
-            "pnl_pct": pnl_pct,
-            "div_score": div_score,
-            "sharpe": sharpe,
-            "fundamentals": fundamentals,
-            "correlation": correlation,
-            "sim_df": sim_df,
-            "volatility": volatility,
-            "advice_report": advice_report,
-            "news_summary": news_summary,
-            "rec_summary": rec_summary,
-            "risk_report": risk_report,
-            "sim_days": sim_days
-        }
+            st.info("📰 Generating news summary...")
+            ticker_list = ", ".join(list(holdings.keys()))
+            advice_report = st.session_state.team['advisor'].run(advisor_context, advisor_prompt)
 
-        st.session_state.analysis_context = f"""
-        PORTFOLIO ANALYSIS REPORT
-        -------------------------
-        Total Value: ${total_val:,.2f}
-        Total P&L: ${total_pnl:,.2f} ({pnl_pct:.1f}%)
-        Diversification Score: {div_score}/100
-        Sharpe Ratio: {sharpe:.2f}
+            news_summary = st.session_state.team['news'].run(
+                ticker_list,
+                "Summarize latest market sentiment for these tickers"
+            )
 
-        HOLDINGS:
-        {fundamentals.to_string()}
+            rec_summary = st.session_state.team['rec'].run(advisor_context)
 
-        ADVISOR VERDICT:
-        {advice_report}
+            risk_context = f"""
+Portfolio Volatility: {avg_vol:.2%}
+Diversification: {div_score}/100
+Holdings: {len(holdings)}
+Avg Correlation: {correlation.values[0, 1] if correlation.shape[0] > 1 else 0:.2f}
+"""
 
-        RISK REPORT:
-        {risk_report}
+            risk_report = st.session_state.team['risk'].run(
+                risk_context,
+                "Identify key portfolio risks and concentration concerns"
+            )
 
-        NEWS SUMMARY:
-        {news_summary}
+            # Save results
+            st.session_state.analysis_results = {
+                "total_val": total_val,
+                "total_pnl": total_pnl,
+                "pnl_pct": pnl_pct,
+                "div_score": div_score,
+                "sharpe": sharpe,
+                "fundamentals": fundamentals,
+                "correlation": correlation,
+                "sim_df": sim_df,
+                "volatility": volatility,
+                "comparison_df": comparison_df,
+                "advice_report": advice_report,
+                "news_summary": news_summary,
+                "rec_summary": rec_summary,
+                "risk_report": risk_report,
+                "sim_days": sim_days,
+                "holdings": holdings
+            }
 
-        OPPORTUNITIES:
-        {rec_summary}
-        """
+            st.session_state.analysis_complete = True
+            st.success("✅ Analysis Complete!")
 
-        st.session_state.analysis_complete = True
-        status.update(label="Analysis Complete", state="complete", expanded=False)
+        except Exception as e:
+            st.error(f"❌ Error during analysis: {str(e)}")
+            logger.error(f"Analysis error: {e}", exc_info=True)
 
-# --- DISPLAY DASHBOARD (IF ANALYSIS COMPLETE) ---
-if st.session_state.analysis_complete:
-    res = st.session_state.results
+# --- DISPLAY RESULTS ---
+if st.session_state.analysis_complete and st.session_state.analysis_results:
+    res = st.session_state.analysis_results
 
-    # --- KPI ROW ---
-    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-    with kpi1:
-        st.metric("Total Portfolio Value", f"${res['total_val']:,.2f}", delta=None)
-    with kpi2:
-        st.metric("Total P&L", f"${res['total_pnl']:,.2f}", delta=f"{res['pnl_pct']:.2f}%")
-    with kpi3:
-        st.metric("Diversification Score", f"{res['div_score']}/100", delta="Target: >70", delta_color="off")
-    with kpi4:
-        st.metric("Est. Sharpe Ratio", f"{res['sharpe']:.2f}", help="Risk-adjusted return metric")
+    # KPI Row
+    col1, col2, col3, col4 = st.columns(4)
 
-    # --- TABS LAYOUT ---
-    tab_strat, tab_intel, tab_risk, tab_data, tab_chat = st.tabs([
-        "AI Strategy", "Market Intelligence", "Risk & Simulation", "Data Explorer", "💬 AI Assistant"
+    with col1:
+        st.metric(
+            "Portfolio Value",
+            f"${res['total_val']:,.0f}",
+            help="Current total portfolio value"
+        )
+
+    with col2:
+        st.metric(
+            "Total P&L",
+            f"${res['total_pnl']:,.0f}",
+            delta=f"{res['pnl_pct']:.1f}%",
+            delta_color="off"
+        )
+
+    with col3:
+        st.metric(
+            "Diversification",
+            f"{res['div_score']}/100",
+            delta="Target: >70" if res['div_score'] < 70 else "Excellent",
+            delta_color="off"
+        )
+
+    with col4:
+        st.metric(
+            "Sharpe Ratio",
+            f"{res['sharpe']:.2f}",
+            help="Risk-adjusted returns"
+        )
+
+    st.markdown("---")
+
+    # Tabs
+    tab_strat, tab_intel, tab_risk, tab_data = st.tabs([
+        "📋 Strategy",
+        "📰 Intelligence",
+        "⚠️ Risk & Forecast",
+        "📊 Data"
     ])
 
-    # --- TAB 1: STRATEGY ---
+    # TAB 1: Strategy
     with tab_strat:
         col_advice, col_alloc = st.columns([2, 1])
+
         with col_advice:
             st.subheader("Chief Investment Officer Verdict")
             st.info(res['advice_report'])
+
         with col_alloc:
             st.subheader("Asset Allocation")
-            fig_pie = px.pie(res['fundamentals'], values='Position Value', names='Ticker', hole=0.4,
-                             color_discrete_sequence=px.colors.qualitative.Pastel)
-            fig_pie.update_layout(margin=dict(t=0, b=0, l=0, r=0), height=300, showlegend=True)
+            fig_pie = px.pie(
+                res['fundamentals'],
+                values='Position Value',
+                names='Ticker',
+                hole=0.4
+            )
+            fig_pie.update_layout(height=350, margin=dict(t=0, b=0, l=0, r=0))
             st.plotly_chart(fig_pie, use_container_width=True)
 
             st.subheader("Sector Breakdown")
-            fig_sector = px.bar(res['fundamentals'], x='Sector', y='Position Value', color='Sector')
-            fig_sector.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0), height=200)
+            fig_sector = px.bar(
+                res['fundamentals'],
+                x='Sector',
+                y='Position Value',
+                color='Sector'
+            )
+            fig_sector.update_layout(
+                showlegend=False,
+                height=250,
+                margin=dict(t=0, b=0, l=0, r=0)
+            )
             st.plotly_chart(fig_sector, use_container_width=True)
 
-    # --- TAB 2: INTELLIGENCE ---
+    # TAB 2: Intelligence
     with tab_intel:
-        c1, c2 = st.columns(2)
-        with c1:
-            st.subheader("Global Market Sentiment")
-            st.markdown(f"""
-            <div style="background-color: #1e2127; padding: 20px; border-radius: 8px; border-left: 4px solid #3498db;">
-                {res['news_summary']}
-            </div>
-            """, unsafe_allow_html=True)
-        with c2:
-            st.subheader("AI Opportunities")
-            st.markdown(f"""
-            <div style="background-color: #1e2127; padding: 20px; border-radius: 8px; border-left: 4px solid #2ecc71;">
-                {res['rec_summary']}
-            </div>
-            """, unsafe_allow_html=True)
+        col1, col2 = st.columns(2)
 
-    # --- TAB 3: RISK & SIMULATION ---
+        with col1:
+            st.subheader("Market Sentiment")
+            st.markdown(res['news_summary'])
+
+        with col2:
+            st.subheader("Diversification Opportunities")
+            st.markdown(res['rec_summary'])
+
+    # TAB 3: Risk
     with tab_risk:
-        st.subheader("Monte Carlo Simulation (95% Confidence)")
+        st.subheader("Monte Carlo Simulation (90-Day Forecast)")
+
         sim_df = res['sim_df']
         sim_days = res['sim_days']
 
         fig_mc = go.Figure()
+
+        # Plot all simulations
         for col in sim_df.columns[:50]:
-            fig_mc.add_trace(go.Scatter(y=sim_df[col], mode='lines', line=dict(width=1, color='rgba(100, 100, 100, 0.1)'), showlegend=False))
+            fig_mc.add_trace(go.Scatter(
+                y=sim_df[col],
+                mode='lines',
+                line=dict(width=1, color='rgba(100,100,100,0.1)'),
+                showlegend=False
+            ))
 
+        # Median
         median_line = sim_df.median(axis=1)
-        fig_mc.add_trace(go.Scatter(y=median_line, mode='lines', name='Median Outcome', line=dict(color='#3498db', width=3)))
+        fig_mc.add_trace(go.Scatter(
+            y=median_line,
+            name='Median',
+            mode='lines',
+            line=dict(color='#3498db', width=3)
+        ))
 
+        # Percentiles
         p95 = sim_df.quantile(0.95, axis=1)
         p05 = sim_df.quantile(0.05, axis=1)
 
-        fig_mc.add_trace(go.Scatter(y=p95, mode='lines', name='95th Percentile (Upside)', line=dict(color='#2ecc71', width=2, dash='dash')))
-        fig_mc.add_trace(go.Scatter(y=p05, mode='lines', name='5th Percentile (Downside)', line=dict(color='#e74c3c', width=2, dash='dash')))
+        fig_mc.add_trace(go.Scatter(
+            y=p95,
+            name='95th Percentile',
+            line=dict(color='#2ecc71', width=2, dash='dash')
+        ))
+
+        fig_mc.add_trace(go.Scatter(
+            y=p05,
+            name='5th Percentile',
+            line=dict(color='#e74c3c', width=2, dash='dash')
+        ))
 
         fig_mc.update_layout(
-            title=f"Projected Portfolio Value ({sim_days} Days)",
+            title=f"Portfolio Value Forecast ({sim_days} Days)",
             xaxis_title="Days",
             yaxis_title="Portfolio Value ($)",
             template="plotly_dark",
             height=500,
             hovermode="x unified"
         )
+
         st.plotly_chart(fig_mc, use_container_width=True)
 
-        r1, r2 = st.columns(2)
-        with r1:
-            st.subheader("Risk Analysis")
+        # Risk analysis
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.subheader("Risk Assessment")
             st.warning(res['risk_report'])
-        with r2:
+
+        with col2:
             st.subheader("Projected Outcomes")
             final_vals = sim_df.iloc[-1]
-            total_val = res['total_val']
-            st.markdown(f"""
-            | Scenario | Projected Value | Change |
-            | :--- | :--- | :--- |
-            | **Optimistic (95%)** | **${final_vals.quantile(0.95):,.2f}** | <span style='color:#2ecc71'>+{(final_vals.quantile(0.95)/total_val - 1)*100:.1f}%</span> |
-            | **Base Case (Median)** | **${final_vals.median():,.2f}** | <span style='color:#3498db'>+{(final_vals.median()/total_val - 1)*100:.1f}%</span> |
-            | **Pessimistic (5%)** | **${final_vals.quantile(0.05):,.2f}** | <span style='color:#e74c3c'>{(final_vals.quantile(0.05)/total_val - 1)*100:.1f}%</span> |
-            """, unsafe_allow_html=True)
+            tv = res['total_val']
 
-    # --- TAB 4: DATA ---
+            st.write("| Scenario | Value | Change |")
+            st.write("|:---|---:|---:|")
+            st.write(f"| Optimistic (95%) | ${final_vals.quantile(0.95):,.0f} | +{(final_vals.quantile(0.95)/tv-1)*100:.1f}% |")
+            st.write(f"| Base (Median) | ${final_vals.median():,.0f} | +{(final_vals.median()/tv-1)*100:.1f}% |")
+            st.write(f"| Pessimistic (5%) | ${final_vals.quantile(0.05):,.0f} | {(final_vals.quantile(0.05)/tv-1)*100:.1f}% |")
+
+    # TAB 4: Data
     with tab_data:
         st.subheader("Holdings Fundamentals")
-        st.dataframe(res['fundamentals'], use_container_width=True)
+        st.dataframe(res['fundamentals'], use_container_width=True, hide_index=True)
+
         st.subheader("Correlation Matrix")
-        st.dataframe(res['correlation'].style.background_gradient(cmap='RdBu', vmin=-1, vmax=1), use_container_width=True)
+        st.dataframe(
+            res['correlation'].style.background_gradient(cmap='RdBu', vmin=-1, vmax=1),
+            use_container_width=True
+        )
 
-    # --- TAB 5: AI ASSISTANT ---
-    with tab_chat:
-        st.subheader("AI Financial Assistant")
-        st.caption("Ask questions about your portfolio, risk metrics, or market trends.")
+        if not res['comparison_df'].empty:
+            st.subheader("Performance vs Benchmark")
+            fig_comp = go.Figure()
 
-        for message in st.session_state.chat_history:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
+            for col in res['comparison_df'].columns:
+                fig_comp.add_trace(go.Scatter(
+                    y=res['comparison_df'][col],
+                    name=col,
+                    mode='lines'
+                ))
 
-        if prompt := st.chat_input("Ask a question about your portfolio..."):
-            st.session_state.chat_history.append({"role": "user", "content": prompt})
-            with st.chat_message("user"):
-                st.markdown(prompt)
+            fig_comp.update_layout(
+                title="Portfolio vs S&P 500 (1-Year)",
+                xaxis_title="Date",
+                yaxis_title="Cumulative Return (%)",
+                template="plotly_dark",
+                height=400
+            )
 
-            with st.chat_message("assistant"):
-                with st.spinner("Thinking..."):
-                    response = get_chat_response(st.session_state.analysis_context, prompt)
-                    st.markdown(response)
+            st.plotly_chart(fig_comp, use_container_width=True)
 
-            st.session_state.chat_history.append({"role": "assistant", "content": response})
-
-elif not st.session_state.analysis_complete:
-    st.info("Get Started: Add your stocks in the sidebar and click 'Initialize Analysis'.")
+else:
+    st.info("👈 Add stocks in the sidebar and click 'Initialize Analysis' to begin.")
