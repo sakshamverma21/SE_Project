@@ -2,17 +2,56 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 
+import yfinance as yf
+import pandas as pd
+import numpy as np
+
+def safe_price(ticker, history):
+    t = yf.Ticker(ticker)
+
+    # Try fast but often empty on cloud
+    try:
+        fi = t.fast_info
+        p = fi.get("last_price") or fi.get("regular_market_price")
+        if p and p > 0:
+            return p
+    except:
+        pass
+
+    # Try 1-day history (MOST reliable on cloud)
+    try:
+        h = t.history(period="1d")["Close"]
+        if len(h.dropna()) > 0:
+            return h.dropna().iloc[-1]
+    except:
+        pass
+
+    # Try 5-day history
+    try:
+        h5 = t.history(period="5d")["Close"]
+        if len(h5.dropna()) > 0:
+            return h5.dropna().iloc[-1]
+    except:
+        pass
+
+    # Fallback to main history if available
+    try:
+        if ticker in history.columns:
+            return history[ticker].dropna().iloc[-1]
+    except:
+        pass
+
+    return 0.0  # last fallback
+
+
 def fetch_market_data(holdings):
     tickers = list(holdings.keys())
 
-    # --- Download history safely ---
+    # --- Download full history ---
     try:
-        raw = yf.download(tickers, period="1y")
-        if "Close" in raw:
-            history = raw["Close"]
-        else:
-            history = pd.DataFrame()
-    except Exception:
+        raw = yf.download(tickers, period="1y", group_by="ticker", auto_adjust=True)
+        history = raw["Close"] if "Close" in raw else pd.DataFrame()
+    except:
         history = pd.DataFrame()
 
     # Benchmark
@@ -25,54 +64,37 @@ def fetch_market_data(holdings):
     fundamentals_list = []
 
     for ticker in tickers:
+        data = holdings[ticker]
+
+        qty = data.get("qty", 0)
+        buy_price = data.get("buy_price", 0)
+
+        # --- SAFE PRICE ---
+        price = safe_price(ticker, history)
+
+        val = price * qty
+        cost_basis = buy_price * qty
+
+        # --- Get sector with fallback ---
         try:
-            t = yf.Ticker(ticker)
+            sector = yf.Ticker(ticker).info.get("sector", "Unknown")
+        except:
+            sector = "Unknown"
 
-            # ---- SAFE PRICE FETCH ----
-            info = t.fast_info  # safer alternative to .info
-
-            price = info.get("last_price") \
-                 or info.get("regular_market_price") \
-                 or info.get("previous_close")
-
-            if not price and ticker in history.columns:
-                price = history[ticker].iloc[-1]
-
-            if not price:
-                price = 0.0
-
-            # holdings data
-            data = holdings.get(ticker, {})
-            qty = data.get("qty", 0)
-            buy_price = data.get("buy_price", 0)
-
-            val = price * qty
-
-            fundamentals_list.append({
-                "Ticker": ticker,
-                "Quantity": qty,
-                "Current Price": price,
-                "Position Value": val,
-                "Cost Basis": buy_price * qty,
-                "Unrealized P&L": val - buy_price * qty,
-                "Sector": info.get("sector", "Unknown")
-            })
-
-        except Exception as e:
-            # Instead of skip silently, append placeholder row
-            fundamentals_list.append({
-                "Ticker": ticker,
-                "Quantity": holdings[ticker]["qty"],
-                "Current Price": 0,
-                "Position Value": 0,
-                "Cost Basis": holdings[ticker]["qty"] * holdings[ticker]["buy_price"],
-                "Unrealized P&L": 0,
-                "Sector": "Unknown",
-            })
+        fundamentals_list.append({
+            "Ticker": ticker,
+            "Quantity": qty,
+            "Current Price": price,
+            "Position Value": val,
+            "Cost Basis": cost_basis,
+            "Unrealized P&L": val - cost_basis,
+            "Sector": sector,
+        })
 
     fundamentals = pd.DataFrame(fundamentals_list)
 
     return history, benchmark, fundamentals, {}
+
 
 def calculate_portfolio_metrics(history, benchmark):
     if isinstance(history, pd.Series): history = history.to_frame()
