@@ -4,45 +4,75 @@ import numpy as np
 
 def fetch_market_data(holdings):
     tickers = list(holdings.keys())
-    
-    # 1. Download History
-    # auto_adjust=True is implicit in new yfinance, so we grab 'Close'
-    history = yf.download(tickers, period="1y")['Close']
-    
-    # 2. Download Benchmark (Handle failure gracefully)
+
+    # --- Download history safely ---
     try:
-        benchmark = yf.download("^GSPC", period="1y")['Close']
+        raw = yf.download(tickers, period="1y")
+        if "Close" in raw:
+            history = raw["Close"]
+        else:
+            history = pd.DataFrame()
+    except Exception:
+        history = pd.DataFrame()
+
+    # Benchmark
+    try:
+        bench_raw = yf.download("^GSPC", period="1y")
+        benchmark = bench_raw["Close"] if "Close" in bench_raw else None
     except:
         benchmark = None
-    
-    fundamentals = []
-    
+
+    fundamentals_list = []
+
     for ticker in tickers:
         try:
             t = yf.Ticker(ticker)
-            info = t.info
-            
-            # Smart Price Logic
-            price = info.get('currentPrice') or info.get('regularMarketPreviousClose') 
+
+            # ---- SAFE PRICE FETCH ----
+            info = t.fast_info  # safer alternative to .info
+
+            price = info.get("last_price") \
+                 or info.get("regular_market_price") \
+                 or info.get("previous_close")
+
+            if not price and ticker in history.columns:
+                price = history[ticker].iloc[-1]
+
             if not price:
-                try: price = history[ticker].iloc[-1]
-                except: price = 0.0
-            
+                price = 0.0
+
+            # holdings data
             data = holdings.get(ticker, {})
-            qty = data['qty'] if isinstance(data, dict) else data
-            buy_price = data.get('buy_price', 0.0) if isinstance(data, dict) else 0.0
-            
+            qty = data.get("qty", 0)
+            buy_price = data.get("buy_price", 0)
+
             val = price * qty
-            
-            fundamentals.append({
-                "Ticker": ticker, "Quantity": qty, "Position Value": val,
-                "Cost Basis": buy_price * qty, "Unrealized P&L": val - (buy_price * qty),
+
+            fundamentals_list.append({
+                "Ticker": ticker,
+                "Quantity": qty,
+                "Current Price": price,
+                "Position Value": val,
+                "Cost Basis": buy_price * qty,
+                "Unrealized P&L": val - buy_price * qty,
                 "Sector": info.get("sector", "Unknown")
             })
+
         except Exception as e:
-            print(f"Skipping {ticker}: {e}")
-            
-    return history, benchmark, pd.DataFrame(fundamentals), {}
+            # Instead of skip silently, append placeholder row
+            fundamentals_list.append({
+                "Ticker": ticker,
+                "Quantity": holdings[ticker]["qty"],
+                "Current Price": 0,
+                "Position Value": 0,
+                "Cost Basis": holdings[ticker]["qty"] * holdings[ticker]["buy_price"],
+                "Unrealized P&L": 0,
+                "Sector": "Unknown",
+            })
+
+    fundamentals = pd.DataFrame(fundamentals_list)
+
+    return history, benchmark, fundamentals, {}
 
 def calculate_portfolio_metrics(history, benchmark):
     if isinstance(history, pd.Series): history = history.to_frame()
